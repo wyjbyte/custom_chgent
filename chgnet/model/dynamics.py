@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import inspect
 import io
+import math
 import pickle
 import sys
 import warnings
 from typing import TYPE_CHECKING, Literal
+from pathlib import Path
+import os
 
 import numpy as np
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    
 from ase import Atoms, units
 from ase.calculators.calculator import (
     BaseCalculator,
@@ -26,9 +36,14 @@ from ase.optimize.fire import FIRE
 from ase.optimize.lbfgs import LBFGS, LBFGSLineSearch
 from ase.optimize.mdmin import MDMin
 from ase.optimize.sciopt import SciPyFminBFGS, SciPyFminCG
-from pymatgen.analysis.eos import BirchMurnaghan
-from pymatgen.core.structure import Molecule, Structure
-from pymatgen.io.ase import AseAtomsAdaptor
+
+try:
+    from pymatgen.analysis.eos import BirchMurnaghan
+    from pymatgen.core.structure import Molecule, Structure
+    from pymatgen.io.ase import AseAtomsAdaptor
+    PYMATGEN_AVAILABLE = True
+except ImportError:
+    PYMATGEN_AVAILABLE = False
 
 from chgnet.model.model import CHGNet
 from chgnet.utils import determine_device
@@ -918,3 +933,224 @@ class EquationOfState:
         if unit in {"Pa^-1", "m^2/N"}:
             return 1 / (self.bm.b0_GPa * 1e9)
         raise NotImplementedError("unit has to be one of A^3/eV, GPa^-1 Pa^-1 or m^2/N")
+
+
+class HighEntropyOptimizer:
+    """高熵结构优化器类
+    
+    基于CHGNet框架实现两阶段高熵结构优化，包括：
+    1. 原子半径表加载与解析
+    2. 位点群定义与原子统计
+    3. 构型熵计算模块
+    """
+    
+    def __init__(self, model=None, radius_table_path: str | None = None):
+        """初始化高熵优化器
+        
+        Args:
+            model: CHGNet模型实例，如果为None则加载默认模型
+            radius_table_path: 原子半径表路径，如果为None则使用默认路径
+        """
+        # 初始化CHGNet模型 (如果可用)
+        if model is None and "CHGNet" in globals():
+            try:
+                self.model = CHGNet.load()
+            except Exception:
+                print("警告: 无法加载CHGNet模型，某些功能可能不可用")
+                self.model = None
+        else:
+            self.model = model
+            
+        # 设置原子半径表路径
+        if radius_table_path is None:
+            # 获取CHGNet包的路径
+            chgnet_path = Path(__file__).parent.parent
+            self.radius_table_path = chgnet_path / "data" / "Atomic_radius_table.csv"
+        else:
+            self.radius_table_path = Path(radius_table_path)
+            
+        # 加载原子半径表
+        self.radius_table = self._load_radius_table()
+        
+        # 玻尔兹曼常数 (eV/K)
+        self.k_B = 8.617333262145e-5
+        
+    def _load_radius_table(self) -> dict:
+        """加载和解析原子半径表 (使用标准库CSV模块)
+        
+        Returns:
+            dict: 原子半径表数据字典
+        """
+        if not self.radius_table_path.exists():
+            raise FileNotFoundError(f"原子半径表文件未找到: {self.radius_table_path}")
+            
+        radius_data = {}
+        
+        with open(self.radius_table_path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # 跳过表头
+            
+            for row in reader:
+                if len(row) >= 4:
+                    element = row[0]
+                    radius_a = row[1] if row[1] else None
+                    radius_b = row[2] if row[2] else None  
+                    radius_o = row[3] if row[3] else None
+                    
+                    radius_data[element] = {
+                        'A': float(radius_a) if radius_a else None,
+                        'B': float(radius_b) if radius_b else None,
+                        'O': float(radius_o) if radius_o else None
+                    }
+                    
+        return radius_data
+        
+    def get_ionic_radius(self, element: str, site_type: str, default_radius: float = 100.0) -> float:
+        """根据元素和位点类型查询离子半径
+        
+        Args:
+            element: 元素符号
+            site_type: 位点类型 ('A', 'B', 'O')
+            default_radius: 默认半径值 (pm)
+            
+        Returns:
+            float: 离子半径值 (pm)
+        """
+        # 查找元素
+        if element not in self.radius_table:
+            print(f"警告: 元素 {element} 未在半径表中找到，使用默认半径 {default_radius} pm")
+            return default_radius
+            
+        # 根据位点类型获取半径
+        radius_value = self.radius_table[element][site_type]
+        
+        if radius_value is None:
+            print(f"警告: 元素 {element} 在 {site_type} 位点的半径未定义，使用默认半径 {default_radius} pm")
+            return default_radius
+            
+        return float(radius_value)
+        
+    def identify_site_groups(self, structure_info: dict) -> dict:
+        """基于原子半径表识别A/B/O位点群
+        
+        Args:
+            structure_info: 结构信息字典，包含 'elements' 键 (元素列表)
+            
+        Returns:
+            dict: 位点群定义，包含每个位点群的原子索引和元素组成
+        """
+        site_groups = {"A": [], "B": [], "O": []}
+        
+        elements = structure_info.get('elements', [])
+        
+        # 遍历结构中的每个原子
+        for i, element in enumerate(elements):
+            # 根据原子半径表确定位点类型
+            # 优先级: O > A > B (基于简单的遍历方法)
+            if element in self.radius_table:
+                data = self.radius_table[element]
+                if data["O"] is not None:
+                    site_groups["O"].append(i)
+                elif data["A"] is not None:
+                    site_groups["A"].append(i)
+                elif data["B"] is not None:
+                    site_groups["B"].append(i)
+                else:
+                    # 如果都没有定义，使用默认分配
+                    self._assign_default_site(element, i, site_groups)
+            else:
+                # 元素不在表中，使用默认分配
+                self._assign_default_site(element, i, site_groups)
+                        
+        return site_groups
+        
+    def _assign_default_site(self, element: str, index: int, site_groups: dict):
+        """为未在半径表中的元素分配默认位点"""
+        # 根据常见规律分配位点
+        if element in ["O", "F", "Cl", "Br", "I", "N", "S", "Se", "Te"]:
+            site_groups["O"].append(index)
+        else:
+            # 对于金属元素，根据元素符号简单分配
+            # 重金属倾向于A位点，轻金属倾向于B位点
+            if element in ["Cs", "Rb", "K", "Ba", "Sr", "Ca", "La", "Ce", "Nd", "Sm", "Pr"]:
+                site_groups["A"].append(index)
+            else:
+                site_groups["B"].append(index)
+        
+    def count_elements_in_site_group(self, elements: list, site_indices: list) -> dict:
+        """统计位点群中各元素的原子数量
+        
+        Args:
+            elements: 元素列表
+            site_indices: 位点群的原子索引列表
+            
+        Returns:
+            dict: 元素-数量映射
+        """
+        element_counts = {}
+        
+        for idx in site_indices:
+            if idx < len(elements):
+                element = elements[idx]
+                element_counts[element] = element_counts.get(element, 0) + 1
+            
+        return element_counts
+        
+    def calculate_configurational_entropy(self, structure_info: dict, site_groups_definition: dict | None = None) -> float:
+        """计算构型熵
+        
+        Args:
+            structure_info: 结构信息字典，包含 'elements' 键
+            site_groups_definition: 位点群定义，如果为None则自动识别
+            
+        Returns:
+            float: 总构型熵值 (eV/K)
+        """
+        if site_groups_definition is None:
+            site_groups_definition = self.identify_site_groups(structure_info)
+            
+        elements = structure_info.get('elements', [])
+        total_entropy = 0.0
+        
+        # 对每个位点群独立计算构型熵
+        for site_type, site_indices in site_groups_definition.items():
+            if not site_indices:  # 空位点群跳过
+                continue
+                
+            # 统计该位点群中各元素的数量
+            element_counts = self.count_elements_in_site_group(elements, site_indices)
+            
+            # 计算总原子数
+            total_atoms_in_group = sum(element_counts.values())
+            
+            if total_atoms_in_group <= 1:  # 单原子或空群组没有构型熵
+                continue
+                
+            # 计算各元素的摩尔分数
+            site_entropy = 0.0
+            for element, count in element_counts.items():
+                mole_fraction = count / total_atoms_in_group
+                
+                # 处理数值稳定性，避免ln(0)
+                if mole_fraction > 1e-10:
+                    site_entropy -= mole_fraction * math.log(mole_fraction)
+                    
+            # 加到总熵中（乘以该位点群的原子数）
+            total_entropy += site_entropy * total_atoms_in_group
+            
+        # 返回以eV/K为单位的熵值
+        return total_entropy * self.k_B
+        
+    # Pymatgen结构支持 (如果可用)
+    if PYMATGEN_AVAILABLE:
+        def process_pymatgen_structure(self, structure) -> dict:
+            """处理pymatgen结构对象"""
+            elements = []
+            for site in structure:
+                elements.append(site.species_string)
+            return {'elements': elements}
+            
+        def calculate_configurational_entropy_from_structure(self, structure, site_groups_definition: dict | None = None) -> float:
+            """从pymatgen结构计算构型熵"""
+            structure_info = self.process_pymatgen_structure(structure)
+            return self.calculate_configurational_entropy(structure_info, site_groups_definition)
