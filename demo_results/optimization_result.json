@@ -1,0 +1,95 @@
+{
+  "optimization_successful": true,
+  "iterations_completed": 5,
+  "optimization_time": 0.9185843467712402,
+  "global_best_fitness": -8.44493195805582,
+  "best_particle_position": {
+    "fcc_sites": [
+      "Cr",
+      "Mn",
+      "Fe",
+      "Ni"
+    ]
+  },
+  "energy_decomposition": {
+    "energy": -8.158224105834961,
+    "configurational_entropy": 5.545177444479562,
+    "mixing_entropy": 1.5451774444795623,
+    "T_S_configurational": 0.28670785222085965,
+    "T_S_mixing": 0.07989185392937966,
+    "fitness_configurational": -8.44493195805582,
+    "fitness_mixing": -8.238115959764341,
+    "temperature": 600.0
+  },
+  "optimization_history": [
+    {
+      "iteration": 0,
+      "global_best_fitness": -8.44493195805582,
+      "average_fitness": -8.44493195805582,
+      "std_fitness": 0.0,
+      "min_fitness": -8.44493195805582,
+      "max_fitness": -8.44493195805582,
+      "valid_particles": 8,
+      "temperature": 600.0
+    },
+    {
+      "iteration": 1,
+      "global_best_fitness": -8.44493195805582,
+      "average_fitness": -8.44493195805582,
+      "std_fitness": 0.0,
+      "min_fitness": -8.44493195805582,
+      "max_fitness": -8.44493195805582,
+      "valid_particles": 8,
+      "temperature": 600.0
+    },
+    {
+      "iteration": 2,
+      "global_best_fitness": -8.44493195805582,
+      "average_fitness": -8.44493195805582,
+      "std_fitness": 0.0,
+      "min_fitness": -8.44493195805582,
+      "max_fitness": -8.44493195805582,
+      "valid_particles": 8,
+      "temperature": 600.0
+    },
+    {
+      "iteration": 3,
+      "global_best_fitness": -8.44493195805582,
+      "average_fitness": -8.44493195805582,
+      "std_fitness": 0.0,
+      "min_fitness": -8.44493195805582,
+      "max_fitness": -8.44493195805582,
+      "valid_particles": 8,
+      "temperature": 600.0
+    },
+    {
+      "iteration": 4,
+      "global_best_fitness": -8.44493195805582,
+      "average_fitness": -8.44493195805582,
+      "std_fitness": 0.0,
+      "min_fitness": -8.44493195805582,
+      "max_fitness": -8.44493195805582,
+      "valid_particles": 8,
+      "temperature": 600.0
+    },
+    {
+      "iteration": 5,
+      "global_best_fitness": -8.44493195805582,
+      "average_fitness": -8.44493195805582,
+      "std_fitness": 0.0,
+      "min_fitness": -8.44493195805582,
+      "max_fitness": -8.44493195805582,
+      "valid_particles": 8,
+      "temperature": 600.0
+    }
+  ],
+  "parameters": {
+    "swarm_size": 8,
+    "max_iterations": 5,
+    "temperature": 600.0,
+    "inertia_weight": 0.5,
+    "cognitive_factor": 1.0,
+    "social_factor": 1.0,
+    "mutation_rate": 0.1
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "optimization_successful": true,
+  "iterations_completed": 3,
+  "optimization_time": 1.3844501972198486,
+  "global_best_fitness": -5.43270552679741,
+  "best_particle_position": {
+    "corner_sites": [
+      "Cr",
+      "Fe",
+      "Co",
+      "Cr",
+      "Ni",
+      "Fe",
+      "Co",
+      "Ni"
+    ]
+  },
+  "energy_decomposition": {
+    "energy": -5.05042839050293,
+    "configurational_entropy": 11.090354888959125,
+    "mixing_entropy": 11.090354888959123,
+    "T_S_configurational": 0.3822771362944795,
+    "T_S_mixing": 0.38227713629447946,
+    "fitness_configurational": -5.43270552679741,
+    "fitness_mixing": -5.43270552679741,
+    "temperature": 400.0
+  },
+  "optimization_history": [
+    {
+      "iteration": 0,
+      "global_best_fitness": -5.387548094241257,
+      "average_fitness": -5.356124604988531,
+      "std_fitness": 0.017965086845638193,
+      "min_fitness": -5.387548094241257,
+      "max_fitness": -5.328609114138718,
+      "valid_particles": 6,
+      "temperature": 400.0
+    },
+    {
+      "iteration": 1,
+      "global_best_fitness": -5.43270552679741,
+      "average_fitness": -5.389812911797002,
+      "std_fitness": 0.02430427818409019,
+      "min_fitness": -5.43270552679741,
+      "max_fitness": -5.3506366066619115,
+      "valid_particles": 6,
+      "temperature": 400.0
+    },
+    {
+      "iteration": 2,
+      "global_best_fitness": -5.43270552679741,
+      "average_fitness": -5.408331677564418,
+      "std_fitness": 0.03447684781254771,
+      "min_fitness": -5.43270552679741,
+      "max_fitness": -5.358379011599656,
+      "valid_particles": 6,
+      "temperature": 400.0
+    },
+    {
+      "iteration": 3,
+      "global_best_fitness": -5.43270552679741,
+      "average_fitness": -5.40775796299024,
+      "std_fitness": 0.03119807233045079,
+      "min_fitness": -5.43270552679741,
+      "max_fitness": -5.3506366066619115,
+      "valid_particles": 6,
+      "temperature": 400.0
+    }
+  ],
+  "parameters": {
+    "swarm_size": 6,
+    "max_iterations": 3,
+    "temperature": 400.0,
+    "inertia_weight": 0.5,
+    "cognitive_factor": 1.0,
+    "social_factor": 1.0,
+    "mutation_rate": 0.1
+  }
+}
