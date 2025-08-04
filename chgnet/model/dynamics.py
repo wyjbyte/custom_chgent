@@ -33,6 +33,12 @@ from pymatgen.io.ase import AseAtomsAdaptor
 from chgnet.model.model import CHGNet
 from chgnet.utils import determine_device
 
+# 添加新的导入
+import csv
+import os
+import numpy as np
+from typing import Dict, List, Tuple, Optional, Callable
+
 if TYPE_CHECKING:
     from ase.io import Trajectory
     from ase.optimize.optimize import Optimizer
@@ -54,6 +60,139 @@ OPTIMIZERS = {
     "BFGSLineSearch": BFGSLineSearch,
 }
 
+
+def load_atomic_radii(csv_path: Optional[str] = None) -> Dict[str, float]:
+    """
+    加载原子半径数据，从CSV文件中读取原子的离子半径。
+
+    Args:
+        csv_path (str, optional): 原子半径数据CSV文件的路径。如果为None，则使用默认路径。
+
+    Returns:
+        Dict[str, float]: 原子符号到离子半径(pm)的映射字典
+    """
+    if csv_path is None:
+        # 假设CSV文件位于chgnet/data/目录下
+        module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        csv_path = os.path.join(module_dir, 'data', 'Atomic_radius_table.csv')
+
+    atomic_radii = {}
+
+    try:
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                atom = row['Atom'].strip()
+                # 按顺序检查A、B、O三列，使用第一个非空值
+                radius = None
+                for col in ['Ion radius at site A', 'Ion radius at site B', 'Ion radius at site O']:
+                    if row[col] and row[col].strip():
+                        radius = float(row[col].strip())
+                        break
+
+                if radius is not None:
+                    atomic_radii[atom] = radius
+    except Exception as e:
+        print(f"加载原子半径数据时出错: {e}")
+
+    return atomic_radii
+
+
+def simple_pso(
+        objective_func: Callable[[np.ndarray], float],
+        bounds: List[Tuple[float, float]],
+        n_particles: int = 20,
+        max_iter: int = 100,
+        c1: float = 0.5,
+        c2: float = 0.5,
+        w: float = 0.9
+) -> Tuple[np.ndarray, float]:
+    """
+    一个粒子群优化(PSO)算法实现。
+
+    Args:
+        objective_func: 目标函数，接收粒子位置(numpy数组)并返回一个标量值
+        bounds: 每个维度的搜索范围，格式为[(min_1, max_1), (min_2, max_2), ...]
+        n_particles: 粒子数量
+        max_iter: 最大迭代次数
+        c1: 认知参数
+        c2: 社会参数
+        w: 惯性权重
+
+    Returns:
+        Tuple[np.ndarray, float]: 最优位置和对应的目标函数值
+    """
+    # 获取问题维度
+    dim = len(bounds)
+
+    # 设置速度限制（基于搜索空间的大小）
+    v_bounds = []
+    for i in range(dim):
+        v_min = -(bounds[i][1] - bounds[i][0]) * 0.2  # 速度限制为搜索范围的10%
+        v_max = (bounds[i][1] - bounds[i][0]) * 0.2
+        v_bounds.append((v_min, v_max))
+
+    # 初始化粒子位置和速度
+    positions = np.zeros((n_particles, dim))
+    velocities = np.zeros((n_particles, dim))
+
+    # 随机初始化粒子位置和速度
+    for i in range(dim):
+        positions[:, i] = np.random.uniform(
+            bounds[i][0], bounds[i][1], size=n_particles
+        )
+        velocities[:, i] = np.random.uniform(
+            v_bounds[i][0], v_bounds[i][1], size=n_particles
+        )
+
+    # 初始化每个粒子的最佳位置和值
+    pbest_pos = positions.copy()
+    pbest_val = np.array([objective_func(pos) for pos in positions])
+
+    # 初始化全局最佳位置和值
+    gbest_idx = np.argmin(pbest_val)
+    gbest_pos = pbest_pos[gbest_idx].copy()
+    gbest_val = pbest_val[gbest_idx]
+
+    # 主循环
+    for _ in range(max_iter):
+        # 更新每个粒子
+        for i in range(n_particles):
+            # 生成随机系数
+            r1 = np.random.random(dim)
+            r2 = np.random.random(dim)
+
+            # 更新速度
+            cognitive_velocity = c1 * r1 * (pbest_pos[i] - positions[i])
+            social_velocity = c2 * r2 * (gbest_pos - positions[i])
+            velocities[i] = w * velocities[i] + cognitive_velocity + social_velocity
+
+            # 应用速度限制
+            for j in range(dim):
+                velocities[i, j] = np.clip(velocities[i, j], v_bounds[j][0], v_bounds[j][1])
+
+            # 更新位置
+            positions[i] += velocities[i]
+
+            # 应用位置边界限制
+            for j in range(dim):
+                positions[i, j] = np.clip(positions[i, j], bounds[j][0], bounds[j][1])
+
+            # 评估新位置
+            val = objective_func(positions[i])
+
+            # 更新粒子最佳位置
+            if val < pbest_val[i]:
+                pbest_pos[i] = positions[i].copy()
+                pbest_val[i] = val
+
+                # 更新全局最佳位置
+                if val < gbest_val:
+                    gbest_pos = positions[i].copy()
+                    gbest_val = val
+
+    # 返回全局最优位置和对应的值
+    return gbest_pos, gbest_val
 
 class CHGNetCalculator(Calculator):
     """CHGNet Calculator for ASE applications."""
@@ -240,12 +379,11 @@ class StructOptimizer:
         """The number of parameters in CHGNet."""
         return self.calculator.model.n_params
 
-
     def relax(
         self,
         atoms: Structure | Atoms,
         *,
-        fmax: float | None = 0.1,
+        fmax: float | None = 0.3,
         steps: int | None = 500,
         relax_cell: bool | None = True,
         ase_filter: str | None = "FrechetCellFilter",
@@ -261,7 +399,7 @@ class StructOptimizer:
         Args:
             atoms (Structure | Atoms): A Structure or Atoms object to relax.
             fmax (float | None): The maximum force tolerance for relaxation.
-                Default = 0.1
+                Default = 0.3
             steps (int | None): The maximum number of steps for relaxation.
                 Default = 500
             relax_cell (bool | None): Whether to relax the cell as well.
@@ -346,7 +484,125 @@ class StructOptimizer:
             )
         return {"final_structure": struct, "trajectory": obs}
 
+    def relax_pso(self, atoms: Structure, n_particles: int = 10, max_iter: int = 50, c1: float = 0.5, c2: float = 0.5,
+                  w: float = 0.9) -> Structure:
+        """
+        使用粒子群优化(PSO)对晶体结构进行优化。
+        通过在原子坐标上施加小的扰动来寻找能量最低的结构配置。
 
+        Args:
+            atoms (Structure): 要优化的Pymatgen Structure对象
+            n_particles (int): PSO算法中的粒子数量，默认为20
+            max_iter (int): PSO算法的最大迭代次数，默认为50
+            c1 (float): PSO的认知参数，默认为0.5
+            c2 (float): PSO的社会参数，默认为0.5
+            w (float): PSO的惯性权重，默认为0.9
+
+        Returns:
+            Structure: 优化后的晶体结构
+        """
+        # 1. 获取原子符号和离子半径映射
+        atomic_radii = load_atomic_radii()
+        default_radius = 120.0  # 默认半径值(pm)
+
+        # 2. 获取结构信息
+        n_atoms = len(atoms)
+        species = [site.specie.symbol for site in atoms]
+
+        # 获取初始分数坐标
+        initial_frac_coords = np.array([site.frac_coords for site in atoms])
+
+        # 3. 计算每个原子的最大位移边界
+        bounds = []
+
+        for i, atom_symbol in enumerate(species):
+            # 查找原子半径，如果不存在则使用默认值
+            radius_pm = atomic_radii.get(atom_symbol, default_radius)
+
+            # 计算笛卡尔坐标系下的最大位移(Å)
+            # 半径从pm转换为Å(除以100)，然后乘以10%
+            max_displacement_A = radius_pm / 100.0 * 0.2
+
+            # 将笛卡尔坐标下的最大位移转换为分数坐标
+            lattice_inv = atoms.lattice.inv_matrix
+
+            # 计算三个轴方向上的最大分数坐标位移
+            cart_displacements = [
+                [max_displacement_A, 0, 0],  # x方向
+                [0, max_displacement_A, 0],  # y方向
+                [0, 0, max_displacement_A]  # z方向
+            ]
+
+            # 计算这些笛卡尔位移在分数坐标下的大小
+            frac_displacements = []
+            for cart_disp in cart_displacements:
+                frac_disp = np.dot(lattice_inv, cart_disp)
+                frac_displacements.append(np.linalg.norm(frac_disp))
+
+            # 设置x, y, z三个方向的边界
+            for j in range(3):
+                # 分数坐标下的边界
+                bounds.append((-frac_displacements[j], frac_displacements[j]))
+
+        # 4. 定义目标函数
+        def objective_function(particle_position: np.ndarray) -> float:
+            """
+            PSO优化的目标函数，计算给定原子位移下结构的能量。
+
+            Args:
+                particle_position (np.ndarray): 所有原子的位移向量，格式为[dx1, dy1, dz1, dx2, dy2, dz2, ...]
+
+            Returns:
+                float: 结构的能量值
+            """
+            # 重塑位移向量为(n_atoms, 3)形状
+            displacements = particle_position.reshape((-1, 3))
+
+            # 计算新的分数坐标
+            new_frac_coords = initial_frac_coords + displacements
+
+            # 创建一个新的结构对象
+            new_structure = atoms.copy()
+
+            # 更新所有原子的位置
+            for i in range(n_atoms):
+                new_structure.replace(i, species[i], new_frac_coords[i], properties=atoms[i].properties)
+
+            # 使用CHGNet计算能量
+            prediction = self.calculator.model.predict_structure(new_structure, task='e')
+
+            # 返回能量值
+            return float(prediction['e'])
+
+        # 5. 调用PSO优化器
+        print(f"开始PSO优化，使用 {n_particles} 个粒子和 {max_iter} 次迭代...")
+        gbest_position, gbest_energy = simple_pso(
+            objective_func=objective_function,
+            bounds=bounds,
+            n_particles=n_particles,
+            max_iter=max_iter,
+            c1=c1,
+            c2=c2,
+            w=w
+        )
+        print(f"PSO优化完成，最佳能量: {gbest_energy}")
+
+        # 6. 处理优化结果
+        # 重塑最佳位置为(n_atoms, 3)形状
+        best_displacements = gbest_position.reshape((-1, 3))
+
+        # 计算最终的原子分数坐标
+        final_frac_coords = initial_frac_coords + best_displacements
+
+        # 创建最终结构
+        final_structure = atoms.copy()
+
+        # 更新所有原子的位置
+        for i in range(n_atoms):
+            final_structure.replace(i, species[i], final_frac_coords[i], properties=atoms[i].properties)
+
+        # 7. 返回优化后的结构
+        return final_structure
 
 class TrajectoryObserver:
     """Trajectory observer is a hook in the relaxation process that saves the
@@ -627,7 +883,7 @@ class MolecularDynamics:
                 try:
                     # Fit bulk modulus by equation of state
                     eos = EquationOfState(model=self.atoms.calc)
-                    eos.fit(atoms=atoms, steps=500, fmax=0.1, verbose=False)
+                    eos.fit(atoms=atoms, steps=500, fmax=0.3, verbose=False)
                     bulk_modulus = eos.get_bulk_modulus(unit="GPa")
                     bulk_modulus_au = eos.get_bulk_modulus(unit="eV/A^3")
                     compressibility_au = eos.get_compressibility(unit="A^3/eV")
@@ -825,7 +1081,7 @@ class EquationOfState:
         atoms: Structure | Atoms,
         *,
         n_points: int = 11,
-        fmax: float | None = 0.1,
+        fmax: float | None = 0.3,
         steps: int | None = 500,
         verbose: bool | None = False,
         **kwargs,
@@ -836,7 +1092,7 @@ class EquationOfState:
             atoms (Structure | Atoms): A Structure or Atoms object to relax.
             n_points (int): Number of structures used in fitting the equation of states
             fmax (float | None): The maximum force tolerance for relaxation.
-                Default = 0.1
+                Default = 0.3
             steps (int | None): The maximum number of steps for relaxation.
                 Default = 500
             verbose (bool): Whether to print the output of the ASE optimizer.
@@ -856,7 +1112,7 @@ class EquationOfState:
         )
 
         volumes, energies = [], []
-        for idx in np.linspace(-0.1, 0.1, n_points):
+        for idx in np.linspace(-0.2, 0.2, n_points):
             structure_strained = local_minima["final_structure"].copy()
             structure_strained.apply_strain([idx, idx, idx])
             result = self.relaxer.relax(
