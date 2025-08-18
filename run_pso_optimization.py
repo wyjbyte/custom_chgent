@@ -231,11 +231,14 @@ def main():
 
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='使用PSO方法优化晶体结构')
-    # parser.add_argument('--input', '-i', type=str, default='./chgnet/test_data/diffcsp',help='输入CIF文件或包含CIF文件的目录路径')
-    # parser.add_argument('--output', '-o', type=str, default='./demo06_diffcsp',help='输出目录，用于保存优化后的结构')
+    # parser.add_argument('--input', '-i', type=str, default='./chgnet/test_data',help='输入CIF文件或包含CIF文件的目录路径')
+    # parser.add_argument('--output', '-o', type=str, default='./chgnet/test_data',help='输出目录，用于保存优化后的结构')
 
-    parser.add_argument('--input', '-i', type=str, default='./cif/mpts_52',help='输入CIF文件或包含CIF文件的目录路径')
-    parser.add_argument('--output', '-o', type=str, default='./cif/optimizer_mpts_52',help='输出目录，用于保存优化后的结构')
+    parser.add_argument('--input', '-i', type=str, default='./test_data',help='输入CIF文件或包含CIF文件的目录路径')
+    parser.add_argument('--output', '-o', type=str, default='./test_data/optimizer', help='输出目录，用于保存优化后的结构')
+
+    # parser.add_argument('--input', '-i', type=str, default='./cif/mpts_52',help='输入CIF文件或包含CIF文件的目录路径')
+    # parser.add_argument('--output', '-o', type=str, default='./cif/optimizer_mpts_52',help='输出目录，用于保存优化后的结构')
     # PSO相关参数
     parser.add_argument('--particles', '-p', type=int, default=10,help='PSO算法的粒子数量 (默认: 10)')
     parser.add_argument('--iterations', '-n', type=int, default=100,help='PSO算法的最大迭代次数 (默认: 100)')
